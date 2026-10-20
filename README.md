@@ -1,3 +1,5 @@
+This is a derivative repository from the project below, for study purposes.
+---------------------------------------------------------------------------
 The code of several works on [oimo.io/works](https://oimo.io/works)
 ---
 
