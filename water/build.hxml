@@ -2,7 +2,6 @@
 -cp ../Pot/src
 -cp ../Muun/src
 -cp ../Std/src
--L hgsl
 -D analyzer-optimize
 --dce full
 -D js-es=6

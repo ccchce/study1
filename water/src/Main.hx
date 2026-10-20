@@ -2,6 +2,7 @@ import js.Syntax;
 import haxe.Timer;
 import js.Browser;
 import js.html.DeviceMotionEvent;
+import js.html.DivElement;
 import js.html.InputElement;
 import js.lib.Float32Array;
 import js.lib.Int32Array;
@@ -64,6 +65,18 @@ class Main extends App {
 	static inline final AERATION_BLUR:Float = 0.01;
 	static inline final AERATION_DAMP:Float = 0.992;
 
+	static inline final INFLOW_PARTICLES:Int = 8;
+	static inline final INFLOW_X:Float = 3.0;
+	static inline final INFLOW_Y:Float = 1.25;
+	static inline final INFLOW_RIGHT_VELOCITY:Float = 0.5;
+	static inline final INFLOW_DOWN_VELOCITY:Float = 0.12;
+	static inline final OUTLET_WIDTH:Float = 5.0;
+	static inline final OUTLET_DEPTH:Float = 2.0;
+	static inline final INITIAL_AERATION:Float = 1.0;
+	static inline final BAFFLE_WIDTH:Float = 1.0;
+	static inline final BAFFLE_MARGIN:Float = 2.0;
+	static inline final WIN_PARTICLES:Int = 100;
+
 	final rand:XorShift = new XorShift();
 	var gridW:Int = 0;
 	var gridH:Int = 0;
@@ -80,10 +93,21 @@ class Main extends App {
 
 	var useWasm:Bool = false;
 	var deviceMotionEnabled:Bool = false;
+	var level:Int = 1;
+	var baffleOpenA:Bool = false;
+	var baffleOpenB:Bool = false;
+	var rightOutflowCount:Int = 0;
+	var won:Bool = false;
+	var winMessage:DivElement;
 
 	override function setup():Void {
 		g = new Graphics(canvas);
 		g.init2D();
+
+		winMessage = cast Browser.document.createElement("div");
+		winMessage.innerHTML = "YOU WIN!";
+		winMessage.style.cssText = "display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1000;color:#ffffff;background:rgba(20,80,140,0.9);padding:24px 40px;border:3px solid #ffffff;border-radius:12px;font:700 48px 'Courier New',monospace;pointer-events:none;";
+		Browser.document.body.appendChild(winMessage);
 
 		mesh = g.createObject();
 		shader = g.createShader(WaterShader.vertexSource, WaterShader.fragmentSource);
@@ -202,7 +226,8 @@ class Main extends App {
 		// spawnBox(pot.width * 0.5, pot.height - 160, pot.width - 50, 300);
 		final isqrt2 = Math.sqrt(0.5);
 
-		spawnBox(pot.width * 0.5 / scale, pot.height * 0.5 / scale, pot.width / scale * isqrt2, pot.height / scale * isqrt2);
+		final baffleX = getBaffleX();
+		spawnBox(baffleX * 0.5, pot.height * 0.5 / scale, baffleX - BAFFLE_MARGIN, pot.height / scale * isqrt2);
 
 		// addParticle(pot.width * 0.5 / SCALE, pot.height * 0.5 / SCALE);
 
@@ -214,10 +239,22 @@ class Main extends App {
 		// }
 		mesh.writer.upload();
 
-		// sync numP
-		new Int32Array(wasm.memory.buffer, wasm.numP.value)[0] = numP;
+		syncParticleCount();
 
 		trace("particles: " + numP);
+	}
+
+	function resetGame():Void {
+		if (level == 1)
+			level = 2;
+		else
+			level = 1;
+		baffleOpenA = false;
+		baffleOpenB = false;
+		rightOutflowCount = 0;
+		won = false;
+		winMessage.style.display = "none";
+		initSimulation();
 	}
 
 	function spawnBox(cx:Float, cy:Float, w:Float, h:Float):Void {
@@ -237,15 +274,15 @@ class Main extends App {
 		}
 	}
 
-	function addParticle(x:Float, y:Float):Void {
+	function addParticle(x:Float, y:Float, vx:Float = 0, vy:Float = 0):Void {
 		if (numP == MAX_PARTICLES)
 			return;
 		var p = numP * ParticleField.SIZE;
-		pdata[p++] = 0;
+		pdata[p++] = INITIAL_AERATION;
 		pdata[p++] = x;
 		pdata[p++] = y;
-		pdata[p++] = 0;
-		pdata[p++] = 0;
+		pdata[p++] = vx;
+		pdata[p++] = vy;
 		pdata[p++] = 0;
 		pdata[p++] = 0;
 		pdata[p++] = 0;
@@ -253,6 +290,120 @@ class Main extends App {
 		pdata[p++] = 0;
 		numP++;
 		mesh.writer.vertex(0, 0, 0);
+		writeParticleColor(numP - 1);
+	}
+
+	function addInflow():Void {
+		for (i in 0...INFLOW_PARTICLES) {
+			final x = INFLOW_X + (i - (INFLOW_PARTICLES - 1) * 0.5) * PDELTA;
+			addParticle(x, INFLOW_Y, INFLOW_RIGHT_VELOCITY, INFLOW_DOWN_VELOCITY);
+		}
+		syncParticleCount();
+	}
+
+	function getBaffleX(index:Int = 0):Float {
+		final width = pot.width / scale;
+		if (level == 2)
+			return width * (index == 0 ? 0.34 : 0.67);
+		return width * 0.5;
+	}
+
+	function openBaffleIfClicked():Void {
+		if (won || input.mouse.dleft != 1)
+			return;
+
+		final mouseX = input.mouse.x / scale;
+		final mouseY = input.mouse.y / scale;
+		final height = pot.height / scale;
+		if (mouseY < 0 || mouseY > height)
+			return;
+		if (Math.abs(mouseX - getBaffleX()) <= BAFFLE_WIDTH * 2) {
+			baffleOpenA = true;
+		} else if (level == 2 && baffleOpenA && Math.abs(mouseX - getBaffleX(1)) <= BAFFLE_WIDTH * 2) {
+			baffleOpenB = true;
+		}
+	}
+
+	function applyBaffle():Void {
+		for (i in 0...numP) {
+			final off = i * ParticleField.SIZE;
+			final px = pdata[off + ParticleField.POS_X];
+			final baffleX = getBaffleX();
+			final leftEdge = baffleX - BAFFLE_WIDTH * 0.5;
+			if (!baffleOpenA && px >= leftEdge) {
+				pdata[off + ParticleField.POS_X] = leftEdge - 1e-3;
+				if (pdata[off + ParticleField.VEL_X] > 0)
+					pdata[off + ParticleField.VEL_X] = 0;
+			}
+			if (level == 2 && !baffleOpenB) {
+				final secondBaffleX = getBaffleX(1);
+				final secondLeftEdge = secondBaffleX - BAFFLE_WIDTH * 0.5;
+				if (pdata[off + ParticleField.POS_X] >= secondLeftEdge) {
+					pdata[off + ParticleField.POS_X] = secondLeftEdge - 1e-3;
+					if (pdata[off + ParticleField.VEL_X] > 0)
+						pdata[off + ParticleField.VEL_X] = 0;
+				}
+			}
+		}
+	}
+
+	function syncParticleCount():Void {
+		new Int32Array(wasm.memory.buffer, wasm.numP.value)[0] = numP;
+	}
+
+	function isOutlet(px:Float, py:Float):Bool {
+		final width = pot.width / scale;
+		final height = pot.height / scale;
+		return py >= height - OUTLET_DEPTH && (px <= OUTLET_WIDTH || px >= width - OUTLET_WIDTH);
+	}
+
+	function removeOutflowParticles():Void {
+		var i = 0;
+		var removed = false;
+		while (i < numP) {
+			final off = i * ParticleField.SIZE;
+			if (!isOutlet(pdata[off + ParticleField.POS_X], pdata[off + ParticleField.POS_Y])) {
+				i++;
+				continue;
+			}
+
+			numP--;
+			final width = pot.width / scale;
+			if (pdata[off + ParticleField.POS_X] >= width - OUTLET_WIDTH)
+				rightOutflowCount++;
+			if (rightOutflowCount >= WIN_PARTICLES) {
+				won = true;
+				winMessage.innerHTML = level == 1 ? "LEVEL 1 COMPLETE!<br><small>CLICK TO START LEVEL 2</small>" : "YOU WIN!";
+				winMessage.style.display = "block";
+			}
+			final last = numP * ParticleField.SIZE;
+			if (i != numP) {
+				for (field in 0...ParticleField.SIZE)
+					pdata[off + field] = pdata[last + field];
+			}
+			removed = true;
+		}
+
+		if (removed) {
+			mesh.writer.clear();
+			for (i in 0...numP)
+				mesh.writer.vertex(0, 0, 0);
+			mesh.writer.upload();
+			syncParticleCount();
+		}
+	}
+
+	function writeParticleColor(index:Int):Void {
+		final p = index * ParticleField.SIZE;
+		final color = mesh.writer.colorWriter.data;
+		final col = index * 4;
+		final pixelScale = canvas.width / pot.width;
+		final d = pdata[p + ParticleField.DENSITY] * INV_DENSITY;
+		final pos = Vec2.of(pdata[p + ParticleField.POS_X], pdata[p + ParticleField.POS_Y]) * scale;
+		color[col] = pos.x;
+		color[col + 1] = pos.y;
+		color[col + 2] = scale * PDELTA * 0.85 * min(d + 0.5, 1.5) * 2 * pixelScale;
+		color[col + 3] = clamp(pdata[p + ParticleField.AERATION], 0, 1);
 	}
 
 	function updateMesh():Void {
@@ -283,17 +434,37 @@ class Main extends App {
 		// 	initSimulation();
 
 		final st = Timer.stamp();
+		final restarting = won && input.mouse.dleft == 1;
+		if (restarting)
+			resetGame();
+		else
+			openBaffleIfClicked();
+		addInflow();
 		for (t in 0...SUBSTEP) {
 			if (useWasm)
 				stepWasm();
 			else
 				step();
+			applyBaffle();
+			removeOutflowParticles();
 		}
 		updateMesh();
 		final en = Timer.stamp();
 		static final info = Browser.document.getElementById("info");
 		info.innerHTML = "Particles: "
 			+ numP
+			+ "<br>Level: "
+			+ level
+			+ "<br>Right outlet: "
+			+ rightOutflowCount
+			+ " / "
+			+ WIN_PARTICLES
+			+ (won ? "<br>YOU WIN!" : level == 2
+				? "<br>Baffles: "
+					+ (baffleOpenA ? "A OPEN" : "A CLOSED")
+					+ " / "
+					+ (baffleOpenB ? "B OPEN" : "B CLOSED")
+				: baffleOpenA ? "<br>Baffle: OPEN" : "<br>Baffle: CLOSED")
 			+ "<br>Time: "
 			+ Math.round((en - st) * 1000 * 1000) / 1000
 			+ "ms ("
@@ -980,6 +1151,44 @@ class Main extends App {
 			g.drawObject(mesh);
 			g.disableDepthTest();
 		}
+
+		g.shaping(Triangles, () -> {
+			final baffleW = BAFFLE_WIDTH * scale;
+			final baffleCount = level == 2 ? 2 : 1;
+			for (i in 0...baffleCount) {
+				final isOpen = i == 0 ? baffleOpenA : baffleOpenB;
+				if (isOpen)
+					continue;
+				final baffleX = getBaffleX(i) * scale;
+				g.color(0.75, 0.75, 0.8, 1);
+				g.vertex(baffleX - baffleW * 0.5, 0);
+				g.vertex(baffleX + baffleW * 0.5, 0);
+				g.vertex(baffleX + baffleW * 0.5, pot.height);
+				g.vertex(baffleX - baffleW * 0.5, 0);
+				g.vertex(baffleX + baffleW * 0.5, pot.height);
+				g.vertex(baffleX - baffleW * 0.5, pot.height);
+			}
+		});
+
+		final outletWidth = OUTLET_WIDTH * scale;
+		final outletHeight = OUTLET_DEPTH * scale;
+		g.shaping(Triangles, () -> {
+			g.color(0.9, 0.1, 0.1, 1);
+			g.vertex(0, pot.height - outletHeight);
+			g.vertex(outletWidth, pot.height - outletHeight);
+			g.vertex(outletWidth, pot.height);
+			g.vertex(0, pot.height - outletHeight);
+			g.vertex(outletWidth, pot.height);
+			g.vertex(0, pot.height);
+
+			g.color(0.1, 0.85, 0.2, 1);
+			g.vertex(pot.width - outletWidth, pot.height - outletHeight);
+			g.vertex(pot.width, pot.height - outletHeight);
+			g.vertex(pot.width, pot.height);
+			g.vertex(pot.width - outletWidth, pot.height - outletHeight);
+			g.vertex(pot.width, pot.height);
+			g.vertex(pot.width - outletWidth, pot.height);
+		});
 	}
 
 	static function main() {
