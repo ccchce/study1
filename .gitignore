@@ -7,3 +7,15 @@
 *.wasm
 *.wat
 /checker.sh
+
+bin
+*.d.ts
+*.map
+*.js
+*.wasm
+*.wat
+
+!/water/bin/
+!/water/bin/index.html
+!/water/bin/main.js
+!/water/bin/main.wasm
