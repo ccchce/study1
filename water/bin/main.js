@@ -81,6 +81,8 @@ class Main extends pot_core_App {
 		this._hx_constructor(canvas,inputTarget,captureKey,captureWheel);
 	}
 	_hx_constructor(canvas,inputTarget,captureKey,captureWheel) {
+		this.leftOutflowBudget = 0;
+		this.level3Passed = [];
 		this.won = false;
 		this.rightOutflowCount = 0;
 		this.baffleOpenB = false;
@@ -269,19 +271,22 @@ class Main extends pot_core_App {
 		this.mesh.writer.clear();
 		this.mesh.material.shader = this.shader;
 		this.numP = 0;
+		this.level3Passed = [];
 		let isqrt2 = Math.sqrt(0.5);
-		let baffleX = this.getBaffleX();
-		this.spawnBox(baffleX * 0.5,this.pot.height * 0.5 / this.scale,baffleX - 2.0,this.pot.height / this.scale * isqrt2);
+		if(this.level == 3) {
+			let width = this.pot.width / this.scale;
+			let height = this.pot.height / this.scale;
+			this.spawnBox(width * 0.2,height * 0.45,width * 0.35,height * 0.65);
+		} else {
+			let baffleX = this.getBaffleX();
+			this.spawnBox(baffleX * 0.5,this.pot.height * 0.5 / this.scale,baffleX - 2.0,this.pot.height / this.scale * isqrt2);
+		}
 		this.mesh.writer.upload();
 		this.syncParticleCount();
-		console.log("src/Main.hx:244:","particles: " + this.numP);
+		console.log("src/Main.hx:256:","particles: " + this.numP);
 	}
 	resetGame() {
-		if(this.level == 1) {
-			this.level = 2;
-		} else {
-			this.level = 1;
-		}
+		this.level = this.level == 3 ? 1 : this.level + 1;
 		this.baffleOpenA = false;
 		this.baffleOpenB = false;
 		this.rightOutflowCount = 0;
@@ -325,6 +330,7 @@ class Main extends pot_core_App {
 		this.pdata[p++] = 0;
 		this.pdata[p++] = 0;
 		this.numP++;
+		this.level3Passed.push(false);
 		let _this = this.mesh.writer;
 		let _this1 = _this.positionWriter;
 		if(_this1.length + 3 > _this1.maxLength) {
@@ -398,8 +404,21 @@ class Main extends pot_core_App {
 		}
 		return width * 0.5;
 	}
+	level3BaffleX(y) {
+		let width = this.pot.width / this.scale;
+		let x = (y - 6.0) / (this.pot.height / this.scale - 6.0);
+		let bottomX = width * 0.142857142857142849;
+		return bottomX + (width - 6.0 - bottomX) * (1 - Math.pow(x < 0 ? 0 : x > 1 ? 1 : x,0.72));
+	}
+	level3InGap(x,y) {
+		if(y <= 6.0) {
+			return x >= this.level3BaffleX(y) - 1.0;
+		} else {
+			return false;
+		}
+	}
 	openBaffleIfClicked() {
-		if(this.won || this.input.pointer.ddown != 1) {
+		if(this.level == 3 || this.won || this.input.pointer.ddown != 1) {
 			return;
 		}
 		let pointerX = this.input.pointer.x / this.scale;
@@ -414,6 +433,30 @@ class Main extends pot_core_App {
 		}
 	}
 	applyBaffle() {
+		if(this.level == 3) {
+			let _g = 0;
+			let _g1 = this.numP;
+			while(_g < _g1) {
+				let i = _g++;
+				let off = i * 10;
+				let px = this.pdata[off + 1];
+				let py = this.pdata[off + 2];
+				let baffleX = this.level3BaffleX(py);
+				if(this.level3InGap(px,py)) {
+					this.level3Passed[i] = true;
+				}
+				if(!this.level3Passed[i] && px >= baffleX) {
+					this.pdata[off + 1] = baffleX - 1e-3;
+					this.pdata[off + 3] = 0;
+					this.pdata[off + 4] = 0;
+					this.pdata[off + 5] = 0;
+					this.pdata[off + 6] = 0;
+					this.pdata[off + 7] = 0;
+					this.pdata[off + 8] = 0;
+				}
+			}
+			return;
+		}
 		let _g = 0;
 		let _g1 = this.numP;
 		while(_g < _g1) {
@@ -451,6 +494,21 @@ class Main extends pot_core_App {
 			return false;
 		}
 	}
+	dampLeftOutletParticles() {
+		let _g = 0;
+		let _g1 = this.numP;
+		while(_g < _g1) {
+			let off = _g++ * 10;
+			if(this.pdata[off + 2] >= this.pot.height / this.scale - 2.0 && this.pdata[off + 1] <= 5.0) {
+				this.pdata[off + 3] = 0;
+				this.pdata[off + 4] = 0;
+				this.pdata[off + 5] = 0;
+				this.pdata[off + 6] = 0;
+				this.pdata[off + 7] = 0;
+				this.pdata[off + 8] = 0;
+			}
+		}
+	}
 	removeOutflowParticles() {
 		let i = 0;
 		let removed = false;
@@ -460,13 +518,20 @@ class Main extends pot_core_App {
 				++i;
 				continue;
 			}
+			let isRightOutlet = this.pdata[off + 1] >= this.pot.width / this.scale - 5.0;
+			if(!isRightOutlet && this.leftOutflowBudget <= 0) {
+				++i;
+				continue;
+			}
 			this.numP--;
-			if(this.pdata[off + 1] >= this.pot.width / this.scale - 5.0) {
+			if(isRightOutlet) {
 				this.rightOutflowCount++;
+			} else {
+				this.leftOutflowBudget--;
 			}
 			if(this.rightOutflowCount >= 100) {
 				this.won = true;
-				this.winMessage.innerHTML = this.level == 1 ? "LEVEL 1 COMPLETE!<br><small>CLICK TO START LEVEL 2</small>" : "YOU WIN!";
+				this.winMessage.innerHTML = this.level < 3 ? "LEVEL " + this.level + " COMPLETE!<br><small>CLICK TO START LEVEL " + (this.level + 1) + "</small>" : "YOU WIN!";
 				this.winMessage.style.display = "block";
 			}
 			let last = this.numP * 10;
@@ -476,7 +541,9 @@ class Main extends pot_core_App {
 					let field = _g++;
 					this.pdata[off + field] = this.pdata[last + field];
 				}
+				this.level3Passed[i] = this.level3Passed[last];
 			}
+			this.level3Passed.pop();
 			removed = true;
 		}
 		if(removed) {
@@ -585,6 +652,7 @@ class Main extends pot_core_App {
 		} else {
 			this.openBaffleIfClicked();
 		}
+		this.leftOutflowBudget = 8;
 		this.addInflow();
 		if(this.useWasm) {
 			this.stepWasm();
@@ -592,6 +660,7 @@ class Main extends pot_core_App {
 			this.step();
 		}
 		this.applyBaffle();
+		this.dampLeftOutletParticles();
 		this.removeOutflowParticles();
 		if(this.useWasm) {
 			this.stepWasm();
@@ -599,9 +668,10 @@ class Main extends pot_core_App {
 			this.step();
 		}
 		this.applyBaffle();
+		this.dampLeftOutletParticles();
 		this.removeOutflowParticles();
 		this.updateMesh();
-		Main.update_info.innerHTML = "Particles: " + this.numP + "<br>Level: " + this.level + "<br>Right outlet: " + this.rightOutflowCount + " / " + 100 + (this.won ? "<br>YOU WIN!" : this.level == 2 ? "<br>Baffles: " + (this.baffleOpenA ? "A OPEN" : "A CLOSED") + " / " + (this.baffleOpenB ? "B OPEN" : "B CLOSED") : this.baffleOpenA ? "<br>Baffle: OPEN" : "<br>Baffle: CLOSED") + "<br>Time: " + Math.round((HxOverrides.now() / 1000 - st) * 1000 * 1000) / 1000 + "ms (" + (this.useWasm ? "WASM" : "JS") + ")";
+		Main.update_info.innerHTML = "Particles: " + this.numP + "<br>Level: " + this.level + "<br>Right outlet: " + this.rightOutflowCount + " / " + 100 + (this.won ? "<br>YOU WIN!" : this.level == 3 ? "<br>Throw particles through the top-right gap" : this.level == 2 ? "<br>Baffles: " + (this.baffleOpenA ? "A OPEN" : "A CLOSED") + " / " + (this.baffleOpenB ? "B OPEN" : "B CLOSED") : this.baffleOpenA ? "<br>Baffle: OPEN" : "<br>Baffle: CLOSED") + "<br>Time: " + Math.round((HxOverrides.now() / 1000 - st) * 1000 * 1000) / 1000 + "ms (" + (this.useWasm ? "WASM" : "JS") + ")";
 	}
 	prepareGrid() {
 		this.gridW = (this.pot.width / this.scale | 0) + 1;
@@ -1211,346 +1281,697 @@ class Main extends pot_core_App {
 		let _this1 = this.g;
 		_this1.beginShape(4);
 		let baffleW = this.scale;
-		let _g = 0;
-		let _g1 = this.level == 2 ? 2 : 1;
-		while(_g < _g1) {
-			let i = _g++;
-			if(i == 0 ? this.baffleOpenA : this.baffleOpenB) {
-				continue;
-			}
-			let baffleX = this.getBaffleX(i) * this.scale;
+		let baffleCount = this.level == 2 ? 2 : 1;
+		if(this.level == 3) {
+			let height = this.pot.height / this.scale;
 			let _this = this.g.localObjWriter;
 			_this.cr = 0.75;
 			_this.cg = 0.75;
 			_this.cb = 0.8;
 			_this.ca = 1;
-			let _this1 = this.g;
-			if(_this1.shapeOpen != true) {
-				throw new Error("begin shape before vertex");
+			let _g = 0;
+			while(_g < 48) {
+				let i = _g++;
+				let y1 = height * i / 48;
+				let y2 = height * (i + 1) / 48;
+				if(y1 <= 6.0) {
+					continue;
+				}
+				let x1 = this.level3BaffleX(y1) * this.scale;
+				let x2 = this.level3BaffleX(y2) * this.scale;
+				let _this = this.g;
+				let y = y1 * this.scale;
+				if(_this.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this1 = _this.localObjWriter;
+				let _this2 = _this1.positionWriter;
+				if(_this2.length + 3 > _this2.maxLength) {
+					_this2.expand();
+				}
+				_this2.data[_this2.length++] = x1 - baffleW * 0.5;
+				_this2.data[_this2.length++] = y;
+				_this2.data[_this2.length++] = 0;
+				_this2.changed = true;
+				let _this3 = _this1.colorWriter;
+				let f1 = _this1.cr;
+				let f2 = _this1.cg;
+				let f3 = _this1.cb;
+				let f4 = _this1.ca;
+				if(_this3.length + 4 > _this3.maxLength) {
+					_this3.expand();
+				}
+				_this3.data[_this3.length++] = f1;
+				_this3.data[_this3.length++] = f2;
+				_this3.data[_this3.length++] = f3;
+				_this3.data[_this3.length++] = f4;
+				_this3.changed = true;
+				let _this4 = _this1.normalWriter;
+				let f11 = _this1.nx;
+				let f21 = _this1.ny;
+				let f31 = _this1.nz;
+				if(_this4.length + 3 > _this4.maxLength) {
+					_this4.expand();
+				}
+				_this4.data[_this4.length++] = f11;
+				_this4.data[_this4.length++] = f21;
+				_this4.data[_this4.length++] = f31;
+				_this4.changed = true;
+				let _this5 = _this1.texCoordWriter;
+				let f12 = _this1.u;
+				let f22 = _this1.v;
+				if(_this5.length + 2 > _this5.maxLength) {
+					_this5.expand();
+				}
+				_this5.data[_this5.length++] = f12;
+				_this5.data[_this5.length++] = f22;
+				_this5.changed = true;
+				let _this6 = _this1.indexWriter;
+				let i1 = _this1.numVertices;
+				if(_this6.length + 1 > _this6.maxLength) {
+					_this6.expand();
+				}
+				_this6.data[_this6.length++] = i1;
+				_this6.changed = true;
+				_this1.numVertices++;
+				let _this7 = this.g;
+				let y3 = y1 * this.scale;
+				if(_this7.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this8 = _this7.localObjWriter;
+				let _this9 = _this8.positionWriter;
+				if(_this9.length + 3 > _this9.maxLength) {
+					_this9.expand();
+				}
+				_this9.data[_this9.length++] = x1 + baffleW * 0.5;
+				_this9.data[_this9.length++] = y3;
+				_this9.data[_this9.length++] = 0;
+				_this9.changed = true;
+				let _this10 = _this8.colorWriter;
+				let f13 = _this8.cr;
+				let f23 = _this8.cg;
+				let f32 = _this8.cb;
+				let f41 = _this8.ca;
+				if(_this10.length + 4 > _this10.maxLength) {
+					_this10.expand();
+				}
+				_this10.data[_this10.length++] = f13;
+				_this10.data[_this10.length++] = f23;
+				_this10.data[_this10.length++] = f32;
+				_this10.data[_this10.length++] = f41;
+				_this10.changed = true;
+				let _this11 = _this8.normalWriter;
+				let f14 = _this8.nx;
+				let f24 = _this8.ny;
+				let f33 = _this8.nz;
+				if(_this11.length + 3 > _this11.maxLength) {
+					_this11.expand();
+				}
+				_this11.data[_this11.length++] = f14;
+				_this11.data[_this11.length++] = f24;
+				_this11.data[_this11.length++] = f33;
+				_this11.changed = true;
+				let _this12 = _this8.texCoordWriter;
+				let f15 = _this8.u;
+				let f25 = _this8.v;
+				if(_this12.length + 2 > _this12.maxLength) {
+					_this12.expand();
+				}
+				_this12.data[_this12.length++] = f15;
+				_this12.data[_this12.length++] = f25;
+				_this12.changed = true;
+				let _this13 = _this8.indexWriter;
+				let i2 = _this8.numVertices;
+				if(_this13.length + 1 > _this13.maxLength) {
+					_this13.expand();
+				}
+				_this13.data[_this13.length++] = i2;
+				_this13.changed = true;
+				_this8.numVertices++;
+				let _this14 = this.g;
+				let y4 = y2 * this.scale;
+				if(_this14.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this15 = _this14.localObjWriter;
+				let _this16 = _this15.positionWriter;
+				if(_this16.length + 3 > _this16.maxLength) {
+					_this16.expand();
+				}
+				_this16.data[_this16.length++] = x2 + baffleW * 0.5;
+				_this16.data[_this16.length++] = y4;
+				_this16.data[_this16.length++] = 0;
+				_this16.changed = true;
+				let _this17 = _this15.colorWriter;
+				let f16 = _this15.cr;
+				let f26 = _this15.cg;
+				let f34 = _this15.cb;
+				let f42 = _this15.ca;
+				if(_this17.length + 4 > _this17.maxLength) {
+					_this17.expand();
+				}
+				_this17.data[_this17.length++] = f16;
+				_this17.data[_this17.length++] = f26;
+				_this17.data[_this17.length++] = f34;
+				_this17.data[_this17.length++] = f42;
+				_this17.changed = true;
+				let _this18 = _this15.normalWriter;
+				let f17 = _this15.nx;
+				let f27 = _this15.ny;
+				let f35 = _this15.nz;
+				if(_this18.length + 3 > _this18.maxLength) {
+					_this18.expand();
+				}
+				_this18.data[_this18.length++] = f17;
+				_this18.data[_this18.length++] = f27;
+				_this18.data[_this18.length++] = f35;
+				_this18.changed = true;
+				let _this19 = _this15.texCoordWriter;
+				let f18 = _this15.u;
+				let f28 = _this15.v;
+				if(_this19.length + 2 > _this19.maxLength) {
+					_this19.expand();
+				}
+				_this19.data[_this19.length++] = f18;
+				_this19.data[_this19.length++] = f28;
+				_this19.changed = true;
+				let _this20 = _this15.indexWriter;
+				let i3 = _this15.numVertices;
+				if(_this20.length + 1 > _this20.maxLength) {
+					_this20.expand();
+				}
+				_this20.data[_this20.length++] = i3;
+				_this20.changed = true;
+				_this15.numVertices++;
+				let _this21 = this.g;
+				let y5 = y1 * this.scale;
+				if(_this21.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this22 = _this21.localObjWriter;
+				let _this23 = _this22.positionWriter;
+				if(_this23.length + 3 > _this23.maxLength) {
+					_this23.expand();
+				}
+				_this23.data[_this23.length++] = x1 - baffleW * 0.5;
+				_this23.data[_this23.length++] = y5;
+				_this23.data[_this23.length++] = 0;
+				_this23.changed = true;
+				let _this24 = _this22.colorWriter;
+				let f19 = _this22.cr;
+				let f29 = _this22.cg;
+				let f36 = _this22.cb;
+				let f43 = _this22.ca;
+				if(_this24.length + 4 > _this24.maxLength) {
+					_this24.expand();
+				}
+				_this24.data[_this24.length++] = f19;
+				_this24.data[_this24.length++] = f29;
+				_this24.data[_this24.length++] = f36;
+				_this24.data[_this24.length++] = f43;
+				_this24.changed = true;
+				let _this25 = _this22.normalWriter;
+				let f110 = _this22.nx;
+				let f210 = _this22.ny;
+				let f37 = _this22.nz;
+				if(_this25.length + 3 > _this25.maxLength) {
+					_this25.expand();
+				}
+				_this25.data[_this25.length++] = f110;
+				_this25.data[_this25.length++] = f210;
+				_this25.data[_this25.length++] = f37;
+				_this25.changed = true;
+				let _this26 = _this22.texCoordWriter;
+				let f111 = _this22.u;
+				let f211 = _this22.v;
+				if(_this26.length + 2 > _this26.maxLength) {
+					_this26.expand();
+				}
+				_this26.data[_this26.length++] = f111;
+				_this26.data[_this26.length++] = f211;
+				_this26.changed = true;
+				let _this27 = _this22.indexWriter;
+				let i4 = _this22.numVertices;
+				if(_this27.length + 1 > _this27.maxLength) {
+					_this27.expand();
+				}
+				_this27.data[_this27.length++] = i4;
+				_this27.changed = true;
+				_this22.numVertices++;
+				let _this28 = this.g;
+				let y6 = y2 * this.scale;
+				if(_this28.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this29 = _this28.localObjWriter;
+				let _this30 = _this29.positionWriter;
+				if(_this30.length + 3 > _this30.maxLength) {
+					_this30.expand();
+				}
+				_this30.data[_this30.length++] = x2 + baffleW * 0.5;
+				_this30.data[_this30.length++] = y6;
+				_this30.data[_this30.length++] = 0;
+				_this30.changed = true;
+				let _this31 = _this29.colorWriter;
+				let f112 = _this29.cr;
+				let f212 = _this29.cg;
+				let f38 = _this29.cb;
+				let f44 = _this29.ca;
+				if(_this31.length + 4 > _this31.maxLength) {
+					_this31.expand();
+				}
+				_this31.data[_this31.length++] = f112;
+				_this31.data[_this31.length++] = f212;
+				_this31.data[_this31.length++] = f38;
+				_this31.data[_this31.length++] = f44;
+				_this31.changed = true;
+				let _this32 = _this29.normalWriter;
+				let f113 = _this29.nx;
+				let f213 = _this29.ny;
+				let f39 = _this29.nz;
+				if(_this32.length + 3 > _this32.maxLength) {
+					_this32.expand();
+				}
+				_this32.data[_this32.length++] = f113;
+				_this32.data[_this32.length++] = f213;
+				_this32.data[_this32.length++] = f39;
+				_this32.changed = true;
+				let _this33 = _this29.texCoordWriter;
+				let f114 = _this29.u;
+				let f214 = _this29.v;
+				if(_this33.length + 2 > _this33.maxLength) {
+					_this33.expand();
+				}
+				_this33.data[_this33.length++] = f114;
+				_this33.data[_this33.length++] = f214;
+				_this33.changed = true;
+				let _this34 = _this29.indexWriter;
+				let i5 = _this29.numVertices;
+				if(_this34.length + 1 > _this34.maxLength) {
+					_this34.expand();
+				}
+				_this34.data[_this34.length++] = i5;
+				_this34.changed = true;
+				_this29.numVertices++;
+				let _this35 = this.g;
+				let y7 = y2 * this.scale;
+				if(_this35.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this36 = _this35.localObjWriter;
+				let _this37 = _this36.positionWriter;
+				if(_this37.length + 3 > _this37.maxLength) {
+					_this37.expand();
+				}
+				_this37.data[_this37.length++] = x2 - baffleW * 0.5;
+				_this37.data[_this37.length++] = y7;
+				_this37.data[_this37.length++] = 0;
+				_this37.changed = true;
+				let _this38 = _this36.colorWriter;
+				let f115 = _this36.cr;
+				let f215 = _this36.cg;
+				let f310 = _this36.cb;
+				let f45 = _this36.ca;
+				if(_this38.length + 4 > _this38.maxLength) {
+					_this38.expand();
+				}
+				_this38.data[_this38.length++] = f115;
+				_this38.data[_this38.length++] = f215;
+				_this38.data[_this38.length++] = f310;
+				_this38.data[_this38.length++] = f45;
+				_this38.changed = true;
+				let _this39 = _this36.normalWriter;
+				let f116 = _this36.nx;
+				let f216 = _this36.ny;
+				let f311 = _this36.nz;
+				if(_this39.length + 3 > _this39.maxLength) {
+					_this39.expand();
+				}
+				_this39.data[_this39.length++] = f116;
+				_this39.data[_this39.length++] = f216;
+				_this39.data[_this39.length++] = f311;
+				_this39.changed = true;
+				let _this40 = _this36.texCoordWriter;
+				let f117 = _this36.u;
+				let f217 = _this36.v;
+				if(_this40.length + 2 > _this40.maxLength) {
+					_this40.expand();
+				}
+				_this40.data[_this40.length++] = f117;
+				_this40.data[_this40.length++] = f217;
+				_this40.changed = true;
+				let _this41 = _this36.indexWriter;
+				let i6 = _this36.numVertices;
+				if(_this41.length + 1 > _this41.maxLength) {
+					_this41.expand();
+				}
+				_this41.data[_this41.length++] = i6;
+				_this41.changed = true;
+				_this36.numVertices++;
 			}
-			let _this2 = _this1.localObjWriter;
-			let _this3 = _this2.positionWriter;
-			if(_this3.length + 3 > _this3.maxLength) {
-				_this3.expand();
+		} else {
+			let _g = 0;
+			let _g1 = baffleCount;
+			while(_g < _g1) {
+				let i = _g++;
+				if(i == 0 ? this.baffleOpenA : this.baffleOpenB) {
+					continue;
+				}
+				let baffleX = this.getBaffleX(i) * this.scale;
+				let _this = this.g.localObjWriter;
+				_this.cr = 0.75;
+				_this.cg = 0.75;
+				_this.cb = 0.8;
+				_this.ca = 1;
+				let _this1 = this.g;
+				if(_this1.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this2 = _this1.localObjWriter;
+				let _this3 = _this2.positionWriter;
+				if(_this3.length + 3 > _this3.maxLength) {
+					_this3.expand();
+				}
+				_this3.data[_this3.length++] = baffleX - baffleW * 0.5;
+				_this3.data[_this3.length++] = 0;
+				_this3.data[_this3.length++] = 0;
+				_this3.changed = true;
+				let _this4 = _this2.colorWriter;
+				let f1 = _this2.cr;
+				let f2 = _this2.cg;
+				let f3 = _this2.cb;
+				let f4 = _this2.ca;
+				if(_this4.length + 4 > _this4.maxLength) {
+					_this4.expand();
+				}
+				_this4.data[_this4.length++] = f1;
+				_this4.data[_this4.length++] = f2;
+				_this4.data[_this4.length++] = f3;
+				_this4.data[_this4.length++] = f4;
+				_this4.changed = true;
+				let _this5 = _this2.normalWriter;
+				let f11 = _this2.nx;
+				let f21 = _this2.ny;
+				let f31 = _this2.nz;
+				if(_this5.length + 3 > _this5.maxLength) {
+					_this5.expand();
+				}
+				_this5.data[_this5.length++] = f11;
+				_this5.data[_this5.length++] = f21;
+				_this5.data[_this5.length++] = f31;
+				_this5.changed = true;
+				let _this6 = _this2.texCoordWriter;
+				let f12 = _this2.u;
+				let f22 = _this2.v;
+				if(_this6.length + 2 > _this6.maxLength) {
+					_this6.expand();
+				}
+				_this6.data[_this6.length++] = f12;
+				_this6.data[_this6.length++] = f22;
+				_this6.changed = true;
+				let _this7 = _this2.indexWriter;
+				let i1 = _this2.numVertices;
+				if(_this7.length + 1 > _this7.maxLength) {
+					_this7.expand();
+				}
+				_this7.data[_this7.length++] = i1;
+				_this7.changed = true;
+				_this2.numVertices++;
+				let _this8 = this.g;
+				if(_this8.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this9 = _this8.localObjWriter;
+				let _this10 = _this9.positionWriter;
+				if(_this10.length + 3 > _this10.maxLength) {
+					_this10.expand();
+				}
+				_this10.data[_this10.length++] = baffleX + baffleW * 0.5;
+				_this10.data[_this10.length++] = 0;
+				_this10.data[_this10.length++] = 0;
+				_this10.changed = true;
+				let _this11 = _this9.colorWriter;
+				let f13 = _this9.cr;
+				let f23 = _this9.cg;
+				let f32 = _this9.cb;
+				let f41 = _this9.ca;
+				if(_this11.length + 4 > _this11.maxLength) {
+					_this11.expand();
+				}
+				_this11.data[_this11.length++] = f13;
+				_this11.data[_this11.length++] = f23;
+				_this11.data[_this11.length++] = f32;
+				_this11.data[_this11.length++] = f41;
+				_this11.changed = true;
+				let _this12 = _this9.normalWriter;
+				let f14 = _this9.nx;
+				let f24 = _this9.ny;
+				let f33 = _this9.nz;
+				if(_this12.length + 3 > _this12.maxLength) {
+					_this12.expand();
+				}
+				_this12.data[_this12.length++] = f14;
+				_this12.data[_this12.length++] = f24;
+				_this12.data[_this12.length++] = f33;
+				_this12.changed = true;
+				let _this13 = _this9.texCoordWriter;
+				let f15 = _this9.u;
+				let f25 = _this9.v;
+				if(_this13.length + 2 > _this13.maxLength) {
+					_this13.expand();
+				}
+				_this13.data[_this13.length++] = f15;
+				_this13.data[_this13.length++] = f25;
+				_this13.changed = true;
+				let _this14 = _this9.indexWriter;
+				let i2 = _this9.numVertices;
+				if(_this14.length + 1 > _this14.maxLength) {
+					_this14.expand();
+				}
+				_this14.data[_this14.length++] = i2;
+				_this14.changed = true;
+				_this9.numVertices++;
+				let _this15 = this.g;
+				let y = this.pot.height;
+				if(_this15.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this16 = _this15.localObjWriter;
+				let _this17 = _this16.positionWriter;
+				if(_this17.length + 3 > _this17.maxLength) {
+					_this17.expand();
+				}
+				_this17.data[_this17.length++] = baffleX + baffleW * 0.5;
+				_this17.data[_this17.length++] = y;
+				_this17.data[_this17.length++] = 0;
+				_this17.changed = true;
+				let _this18 = _this16.colorWriter;
+				let f16 = _this16.cr;
+				let f26 = _this16.cg;
+				let f34 = _this16.cb;
+				let f42 = _this16.ca;
+				if(_this18.length + 4 > _this18.maxLength) {
+					_this18.expand();
+				}
+				_this18.data[_this18.length++] = f16;
+				_this18.data[_this18.length++] = f26;
+				_this18.data[_this18.length++] = f34;
+				_this18.data[_this18.length++] = f42;
+				_this18.changed = true;
+				let _this19 = _this16.normalWriter;
+				let f17 = _this16.nx;
+				let f27 = _this16.ny;
+				let f35 = _this16.nz;
+				if(_this19.length + 3 > _this19.maxLength) {
+					_this19.expand();
+				}
+				_this19.data[_this19.length++] = f17;
+				_this19.data[_this19.length++] = f27;
+				_this19.data[_this19.length++] = f35;
+				_this19.changed = true;
+				let _this20 = _this16.texCoordWriter;
+				let f18 = _this16.u;
+				let f28 = _this16.v;
+				if(_this20.length + 2 > _this20.maxLength) {
+					_this20.expand();
+				}
+				_this20.data[_this20.length++] = f18;
+				_this20.data[_this20.length++] = f28;
+				_this20.changed = true;
+				let _this21 = _this16.indexWriter;
+				let i3 = _this16.numVertices;
+				if(_this21.length + 1 > _this21.maxLength) {
+					_this21.expand();
+				}
+				_this21.data[_this21.length++] = i3;
+				_this21.changed = true;
+				_this16.numVertices++;
+				let _this22 = this.g;
+				if(_this22.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this23 = _this22.localObjWriter;
+				let _this24 = _this23.positionWriter;
+				if(_this24.length + 3 > _this24.maxLength) {
+					_this24.expand();
+				}
+				_this24.data[_this24.length++] = baffleX - baffleW * 0.5;
+				_this24.data[_this24.length++] = 0;
+				_this24.data[_this24.length++] = 0;
+				_this24.changed = true;
+				let _this25 = _this23.colorWriter;
+				let f19 = _this23.cr;
+				let f29 = _this23.cg;
+				let f36 = _this23.cb;
+				let f43 = _this23.ca;
+				if(_this25.length + 4 > _this25.maxLength) {
+					_this25.expand();
+				}
+				_this25.data[_this25.length++] = f19;
+				_this25.data[_this25.length++] = f29;
+				_this25.data[_this25.length++] = f36;
+				_this25.data[_this25.length++] = f43;
+				_this25.changed = true;
+				let _this26 = _this23.normalWriter;
+				let f110 = _this23.nx;
+				let f210 = _this23.ny;
+				let f37 = _this23.nz;
+				if(_this26.length + 3 > _this26.maxLength) {
+					_this26.expand();
+				}
+				_this26.data[_this26.length++] = f110;
+				_this26.data[_this26.length++] = f210;
+				_this26.data[_this26.length++] = f37;
+				_this26.changed = true;
+				let _this27 = _this23.texCoordWriter;
+				let f111 = _this23.u;
+				let f211 = _this23.v;
+				if(_this27.length + 2 > _this27.maxLength) {
+					_this27.expand();
+				}
+				_this27.data[_this27.length++] = f111;
+				_this27.data[_this27.length++] = f211;
+				_this27.changed = true;
+				let _this28 = _this23.indexWriter;
+				let i4 = _this23.numVertices;
+				if(_this28.length + 1 > _this28.maxLength) {
+					_this28.expand();
+				}
+				_this28.data[_this28.length++] = i4;
+				_this28.changed = true;
+				_this23.numVertices++;
+				let _this29 = this.g;
+				let y1 = this.pot.height;
+				if(_this29.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this30 = _this29.localObjWriter;
+				let _this31 = _this30.positionWriter;
+				if(_this31.length + 3 > _this31.maxLength) {
+					_this31.expand();
+				}
+				_this31.data[_this31.length++] = baffleX + baffleW * 0.5;
+				_this31.data[_this31.length++] = y1;
+				_this31.data[_this31.length++] = 0;
+				_this31.changed = true;
+				let _this32 = _this30.colorWriter;
+				let f112 = _this30.cr;
+				let f212 = _this30.cg;
+				let f38 = _this30.cb;
+				let f44 = _this30.ca;
+				if(_this32.length + 4 > _this32.maxLength) {
+					_this32.expand();
+				}
+				_this32.data[_this32.length++] = f112;
+				_this32.data[_this32.length++] = f212;
+				_this32.data[_this32.length++] = f38;
+				_this32.data[_this32.length++] = f44;
+				_this32.changed = true;
+				let _this33 = _this30.normalWriter;
+				let f113 = _this30.nx;
+				let f213 = _this30.ny;
+				let f39 = _this30.nz;
+				if(_this33.length + 3 > _this33.maxLength) {
+					_this33.expand();
+				}
+				_this33.data[_this33.length++] = f113;
+				_this33.data[_this33.length++] = f213;
+				_this33.data[_this33.length++] = f39;
+				_this33.changed = true;
+				let _this34 = _this30.texCoordWriter;
+				let f114 = _this30.u;
+				let f214 = _this30.v;
+				if(_this34.length + 2 > _this34.maxLength) {
+					_this34.expand();
+				}
+				_this34.data[_this34.length++] = f114;
+				_this34.data[_this34.length++] = f214;
+				_this34.changed = true;
+				let _this35 = _this30.indexWriter;
+				let i5 = _this30.numVertices;
+				if(_this35.length + 1 > _this35.maxLength) {
+					_this35.expand();
+				}
+				_this35.data[_this35.length++] = i5;
+				_this35.changed = true;
+				_this30.numVertices++;
+				let _this36 = this.g;
+				let y2 = this.pot.height;
+				if(_this36.shapeOpen != true) {
+					throw new Error("begin shape before vertex");
+				}
+				let _this37 = _this36.localObjWriter;
+				let _this38 = _this37.positionWriter;
+				if(_this38.length + 3 > _this38.maxLength) {
+					_this38.expand();
+				}
+				_this38.data[_this38.length++] = baffleX - baffleW * 0.5;
+				_this38.data[_this38.length++] = y2;
+				_this38.data[_this38.length++] = 0;
+				_this38.changed = true;
+				let _this39 = _this37.colorWriter;
+				let f115 = _this37.cr;
+				let f215 = _this37.cg;
+				let f310 = _this37.cb;
+				let f45 = _this37.ca;
+				if(_this39.length + 4 > _this39.maxLength) {
+					_this39.expand();
+				}
+				_this39.data[_this39.length++] = f115;
+				_this39.data[_this39.length++] = f215;
+				_this39.data[_this39.length++] = f310;
+				_this39.data[_this39.length++] = f45;
+				_this39.changed = true;
+				let _this40 = _this37.normalWriter;
+				let f116 = _this37.nx;
+				let f216 = _this37.ny;
+				let f311 = _this37.nz;
+				if(_this40.length + 3 > _this40.maxLength) {
+					_this40.expand();
+				}
+				_this40.data[_this40.length++] = f116;
+				_this40.data[_this40.length++] = f216;
+				_this40.data[_this40.length++] = f311;
+				_this40.changed = true;
+				let _this41 = _this37.texCoordWriter;
+				let f117 = _this37.u;
+				let f217 = _this37.v;
+				if(_this41.length + 2 > _this41.maxLength) {
+					_this41.expand();
+				}
+				_this41.data[_this41.length++] = f117;
+				_this41.data[_this41.length++] = f217;
+				_this41.changed = true;
+				let _this42 = _this37.indexWriter;
+				let i6 = _this37.numVertices;
+				if(_this42.length + 1 > _this42.maxLength) {
+					_this42.expand();
+				}
+				_this42.data[_this42.length++] = i6;
+				_this42.changed = true;
+				_this37.numVertices++;
 			}
-			_this3.data[_this3.length++] = baffleX - baffleW * 0.5;
-			_this3.data[_this3.length++] = 0;
-			_this3.data[_this3.length++] = 0;
-			_this3.changed = true;
-			let _this4 = _this2.colorWriter;
-			let f1 = _this2.cr;
-			let f2 = _this2.cg;
-			let f3 = _this2.cb;
-			let f4 = _this2.ca;
-			if(_this4.length + 4 > _this4.maxLength) {
-				_this4.expand();
-			}
-			_this4.data[_this4.length++] = f1;
-			_this4.data[_this4.length++] = f2;
-			_this4.data[_this4.length++] = f3;
-			_this4.data[_this4.length++] = f4;
-			_this4.changed = true;
-			let _this5 = _this2.normalWriter;
-			let f11 = _this2.nx;
-			let f21 = _this2.ny;
-			let f31 = _this2.nz;
-			if(_this5.length + 3 > _this5.maxLength) {
-				_this5.expand();
-			}
-			_this5.data[_this5.length++] = f11;
-			_this5.data[_this5.length++] = f21;
-			_this5.data[_this5.length++] = f31;
-			_this5.changed = true;
-			let _this6 = _this2.texCoordWriter;
-			let f12 = _this2.u;
-			let f22 = _this2.v;
-			if(_this6.length + 2 > _this6.maxLength) {
-				_this6.expand();
-			}
-			_this6.data[_this6.length++] = f12;
-			_this6.data[_this6.length++] = f22;
-			_this6.changed = true;
-			let _this7 = _this2.indexWriter;
-			let i1 = _this2.numVertices;
-			if(_this7.length + 1 > _this7.maxLength) {
-				_this7.expand();
-			}
-			_this7.data[_this7.length++] = i1;
-			_this7.changed = true;
-			_this2.numVertices++;
-			let _this8 = this.g;
-			if(_this8.shapeOpen != true) {
-				throw new Error("begin shape before vertex");
-			}
-			let _this9 = _this8.localObjWriter;
-			let _this10 = _this9.positionWriter;
-			if(_this10.length + 3 > _this10.maxLength) {
-				_this10.expand();
-			}
-			_this10.data[_this10.length++] = baffleX + baffleW * 0.5;
-			_this10.data[_this10.length++] = 0;
-			_this10.data[_this10.length++] = 0;
-			_this10.changed = true;
-			let _this11 = _this9.colorWriter;
-			let f13 = _this9.cr;
-			let f23 = _this9.cg;
-			let f32 = _this9.cb;
-			let f41 = _this9.ca;
-			if(_this11.length + 4 > _this11.maxLength) {
-				_this11.expand();
-			}
-			_this11.data[_this11.length++] = f13;
-			_this11.data[_this11.length++] = f23;
-			_this11.data[_this11.length++] = f32;
-			_this11.data[_this11.length++] = f41;
-			_this11.changed = true;
-			let _this12 = _this9.normalWriter;
-			let f14 = _this9.nx;
-			let f24 = _this9.ny;
-			let f33 = _this9.nz;
-			if(_this12.length + 3 > _this12.maxLength) {
-				_this12.expand();
-			}
-			_this12.data[_this12.length++] = f14;
-			_this12.data[_this12.length++] = f24;
-			_this12.data[_this12.length++] = f33;
-			_this12.changed = true;
-			let _this13 = _this9.texCoordWriter;
-			let f15 = _this9.u;
-			let f25 = _this9.v;
-			if(_this13.length + 2 > _this13.maxLength) {
-				_this13.expand();
-			}
-			_this13.data[_this13.length++] = f15;
-			_this13.data[_this13.length++] = f25;
-			_this13.changed = true;
-			let _this14 = _this9.indexWriter;
-			let i2 = _this9.numVertices;
-			if(_this14.length + 1 > _this14.maxLength) {
-				_this14.expand();
-			}
-			_this14.data[_this14.length++] = i2;
-			_this14.changed = true;
-			_this9.numVertices++;
-			let _this15 = this.g;
-			let y = this.pot.height;
-			if(_this15.shapeOpen != true) {
-				throw new Error("begin shape before vertex");
-			}
-			let _this16 = _this15.localObjWriter;
-			let _this17 = _this16.positionWriter;
-			if(_this17.length + 3 > _this17.maxLength) {
-				_this17.expand();
-			}
-			_this17.data[_this17.length++] = baffleX + baffleW * 0.5;
-			_this17.data[_this17.length++] = y;
-			_this17.data[_this17.length++] = 0;
-			_this17.changed = true;
-			let _this18 = _this16.colorWriter;
-			let f16 = _this16.cr;
-			let f26 = _this16.cg;
-			let f34 = _this16.cb;
-			let f42 = _this16.ca;
-			if(_this18.length + 4 > _this18.maxLength) {
-				_this18.expand();
-			}
-			_this18.data[_this18.length++] = f16;
-			_this18.data[_this18.length++] = f26;
-			_this18.data[_this18.length++] = f34;
-			_this18.data[_this18.length++] = f42;
-			_this18.changed = true;
-			let _this19 = _this16.normalWriter;
-			let f17 = _this16.nx;
-			let f27 = _this16.ny;
-			let f35 = _this16.nz;
-			if(_this19.length + 3 > _this19.maxLength) {
-				_this19.expand();
-			}
-			_this19.data[_this19.length++] = f17;
-			_this19.data[_this19.length++] = f27;
-			_this19.data[_this19.length++] = f35;
-			_this19.changed = true;
-			let _this20 = _this16.texCoordWriter;
-			let f18 = _this16.u;
-			let f28 = _this16.v;
-			if(_this20.length + 2 > _this20.maxLength) {
-				_this20.expand();
-			}
-			_this20.data[_this20.length++] = f18;
-			_this20.data[_this20.length++] = f28;
-			_this20.changed = true;
-			let _this21 = _this16.indexWriter;
-			let i3 = _this16.numVertices;
-			if(_this21.length + 1 > _this21.maxLength) {
-				_this21.expand();
-			}
-			_this21.data[_this21.length++] = i3;
-			_this21.changed = true;
-			_this16.numVertices++;
-			let _this22 = this.g;
-			if(_this22.shapeOpen != true) {
-				throw new Error("begin shape before vertex");
-			}
-			let _this23 = _this22.localObjWriter;
-			let _this24 = _this23.positionWriter;
-			if(_this24.length + 3 > _this24.maxLength) {
-				_this24.expand();
-			}
-			_this24.data[_this24.length++] = baffleX - baffleW * 0.5;
-			_this24.data[_this24.length++] = 0;
-			_this24.data[_this24.length++] = 0;
-			_this24.changed = true;
-			let _this25 = _this23.colorWriter;
-			let f19 = _this23.cr;
-			let f29 = _this23.cg;
-			let f36 = _this23.cb;
-			let f43 = _this23.ca;
-			if(_this25.length + 4 > _this25.maxLength) {
-				_this25.expand();
-			}
-			_this25.data[_this25.length++] = f19;
-			_this25.data[_this25.length++] = f29;
-			_this25.data[_this25.length++] = f36;
-			_this25.data[_this25.length++] = f43;
-			_this25.changed = true;
-			let _this26 = _this23.normalWriter;
-			let f110 = _this23.nx;
-			let f210 = _this23.ny;
-			let f37 = _this23.nz;
-			if(_this26.length + 3 > _this26.maxLength) {
-				_this26.expand();
-			}
-			_this26.data[_this26.length++] = f110;
-			_this26.data[_this26.length++] = f210;
-			_this26.data[_this26.length++] = f37;
-			_this26.changed = true;
-			let _this27 = _this23.texCoordWriter;
-			let f111 = _this23.u;
-			let f211 = _this23.v;
-			if(_this27.length + 2 > _this27.maxLength) {
-				_this27.expand();
-			}
-			_this27.data[_this27.length++] = f111;
-			_this27.data[_this27.length++] = f211;
-			_this27.changed = true;
-			let _this28 = _this23.indexWriter;
-			let i4 = _this23.numVertices;
-			if(_this28.length + 1 > _this28.maxLength) {
-				_this28.expand();
-			}
-			_this28.data[_this28.length++] = i4;
-			_this28.changed = true;
-			_this23.numVertices++;
-			let _this29 = this.g;
-			let y1 = this.pot.height;
-			if(_this29.shapeOpen != true) {
-				throw new Error("begin shape before vertex");
-			}
-			let _this30 = _this29.localObjWriter;
-			let _this31 = _this30.positionWriter;
-			if(_this31.length + 3 > _this31.maxLength) {
-				_this31.expand();
-			}
-			_this31.data[_this31.length++] = baffleX + baffleW * 0.5;
-			_this31.data[_this31.length++] = y1;
-			_this31.data[_this31.length++] = 0;
-			_this31.changed = true;
-			let _this32 = _this30.colorWriter;
-			let f112 = _this30.cr;
-			let f212 = _this30.cg;
-			let f38 = _this30.cb;
-			let f44 = _this30.ca;
-			if(_this32.length + 4 > _this32.maxLength) {
-				_this32.expand();
-			}
-			_this32.data[_this32.length++] = f112;
-			_this32.data[_this32.length++] = f212;
-			_this32.data[_this32.length++] = f38;
-			_this32.data[_this32.length++] = f44;
-			_this32.changed = true;
-			let _this33 = _this30.normalWriter;
-			let f113 = _this30.nx;
-			let f213 = _this30.ny;
-			let f39 = _this30.nz;
-			if(_this33.length + 3 > _this33.maxLength) {
-				_this33.expand();
-			}
-			_this33.data[_this33.length++] = f113;
-			_this33.data[_this33.length++] = f213;
-			_this33.data[_this33.length++] = f39;
-			_this33.changed = true;
-			let _this34 = _this30.texCoordWriter;
-			let f114 = _this30.u;
-			let f214 = _this30.v;
-			if(_this34.length + 2 > _this34.maxLength) {
-				_this34.expand();
-			}
-			_this34.data[_this34.length++] = f114;
-			_this34.data[_this34.length++] = f214;
-			_this34.changed = true;
-			let _this35 = _this30.indexWriter;
-			let i5 = _this30.numVertices;
-			if(_this35.length + 1 > _this35.maxLength) {
-				_this35.expand();
-			}
-			_this35.data[_this35.length++] = i5;
-			_this35.changed = true;
-			_this30.numVertices++;
-			let _this36 = this.g;
-			let y2 = this.pot.height;
-			if(_this36.shapeOpen != true) {
-				throw new Error("begin shape before vertex");
-			}
-			let _this37 = _this36.localObjWriter;
-			let _this38 = _this37.positionWriter;
-			if(_this38.length + 3 > _this38.maxLength) {
-				_this38.expand();
-			}
-			_this38.data[_this38.length++] = baffleX - baffleW * 0.5;
-			_this38.data[_this38.length++] = y2;
-			_this38.data[_this38.length++] = 0;
-			_this38.changed = true;
-			let _this39 = _this37.colorWriter;
-			let f115 = _this37.cr;
-			let f215 = _this37.cg;
-			let f310 = _this37.cb;
-			let f45 = _this37.ca;
-			if(_this39.length + 4 > _this39.maxLength) {
-				_this39.expand();
-			}
-			_this39.data[_this39.length++] = f115;
-			_this39.data[_this39.length++] = f215;
-			_this39.data[_this39.length++] = f310;
-			_this39.data[_this39.length++] = f45;
-			_this39.changed = true;
-			let _this40 = _this37.normalWriter;
-			let f116 = _this37.nx;
-			let f216 = _this37.ny;
-			let f311 = _this37.nz;
-			if(_this40.length + 3 > _this40.maxLength) {
-				_this40.expand();
-			}
-			_this40.data[_this40.length++] = f116;
-			_this40.data[_this40.length++] = f216;
-			_this40.data[_this40.length++] = f311;
-			_this40.changed = true;
-			let _this41 = _this37.texCoordWriter;
-			let f117 = _this37.u;
-			let f217 = _this37.v;
-			if(_this41.length + 2 > _this41.maxLength) {
-				_this41.expand();
-			}
-			_this41.data[_this41.length++] = f117;
-			_this41.data[_this41.length++] = f217;
-			_this41.changed = true;
-			let _this42 = _this37.indexWriter;
-			let i6 = _this37.numVertices;
-			if(_this42.length + 1 > _this42.maxLength) {
-				_this42.expand();
-			}
-			_this42.data[_this42.length++] = i6;
-			_this42.changed = true;
-			_this37.numVertices++;
 		}
 		_this1.endShape();
 		let outletWidth = 5.0 * this.scale;

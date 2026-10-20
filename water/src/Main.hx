@@ -76,6 +76,9 @@ class Main extends App {
 	static inline final BAFFLE_WIDTH:Float = 1.0;
 	static inline final BAFFLE_MARGIN:Float = 2.0;
 	static inline final WIN_PARTICLES:Int = 100;
+	static inline final LEVEL3_GAP_WIDTH:Float = 6.0;
+	static inline final LEVEL3_GAP_DEPTH:Float = 6.0;
+	static inline final LEVEL3_BAFFLE_OFFSET:Float = 1 / 7;
 
 	final rand:XorShift = new XorShift();
 	var gridW:Int = 0;
@@ -99,6 +102,8 @@ class Main extends App {
 	var rightOutflowCount:Int = 0;
 	var won:Bool = false;
 	var winMessage:DivElement;
+	var level3Passed:Array<Bool> = [];
+	var leftOutflowBudget:Int = 0;
 
 	override function setup():Void {
 		g = new Graphics(canvas);
@@ -221,13 +226,20 @@ class Main extends App {
 		mesh.writer.clear();
 		mesh.material.shader = shader;
 		numP = 0;
+		level3Passed = [];
 		// spawnBox(pot.width * 0.5, 200, 200, 200);
 		// spawnBox(pot.width * 0.5, 110, 200, 200);
 		// spawnBox(pot.width * 0.5, pot.height - 160, pot.width - 50, 300);
 		final isqrt2 = Math.sqrt(0.5);
 
-		final baffleX = getBaffleX();
-		spawnBox(baffleX * 0.5, pot.height * 0.5 / scale, baffleX - BAFFLE_MARGIN, pot.height / scale * isqrt2);
+		if (level == 3) {
+			final width = pot.width / scale;
+			final height = pot.height / scale;
+			spawnBox(width * 0.2, height * 0.45, width * 0.35, height * 0.65);
+		} else {
+			final baffleX = getBaffleX();
+			spawnBox(baffleX * 0.5, pot.height * 0.5 / scale, baffleX - BAFFLE_MARGIN, pot.height / scale * isqrt2);
+		}
 
 		// addParticle(pot.width * 0.5 / SCALE, pot.height * 0.5 / SCALE);
 
@@ -245,10 +257,7 @@ class Main extends App {
 	}
 
 	function resetGame():Void {
-		if (level == 1)
-			level = 2;
-		else
-			level = 1;
+		level = level == 3 ? 1 : level + 1;
 		baffleOpenA = false;
 		baffleOpenB = false;
 		rightOutflowCount = 0;
@@ -289,6 +298,7 @@ class Main extends App {
 		pdata[p++] = 0;
 		pdata[p++] = 0;
 		numP++;
+		level3Passed.push(false);
 		mesh.writer.vertex(0, 0, 0);
 		writeParticleColor(numP - 1);
 	}
@@ -308,8 +318,21 @@ class Main extends App {
 		return width * 0.5;
 	}
 
+	function level3BaffleX(y:Float):Float {
+		final width = pot.width / scale;
+		final height = pot.height / scale;
+		final t = clamp((y - LEVEL3_GAP_DEPTH) / (height - LEVEL3_GAP_DEPTH), 0, 1);
+		final bottomX = width * LEVEL3_BAFFLE_OFFSET;
+		final topX = width - LEVEL3_GAP_WIDTH;
+		return bottomX + (topX - bottomX) * (1 - Math.pow(t, 0.72));
+	}
+
+	function level3InGap(x:Float, y:Float):Bool {
+		return y <= LEVEL3_GAP_DEPTH && x >= level3BaffleX(y) - BAFFLE_WIDTH;
+	}
+
 	function openBaffleIfClicked():Void {
-		if (won || input.pointer.ddown != 1)
+		if (level == 3 || won || input.pointer.ddown != 1)
 			return;
 
 		final pointerX = input.pointer.x / scale;
@@ -325,6 +348,28 @@ class Main extends App {
 	}
 
 	function applyBaffle():Void {
+		if (level == 3) {
+			final width = pot.width / scale;
+			for (i in 0...numP) {
+				final off = i * ParticleField.SIZE;
+				final px = pdata[off + ParticleField.POS_X];
+				final py = pdata[off + ParticleField.POS_Y];
+				final baffleX = level3BaffleX(py);
+				if (level3InGap(px, py))
+					level3Passed[i] = true;
+				if (!level3Passed[i] && px >= baffleX) {
+					pdata[off + ParticleField.POS_X] = baffleX - 1e-3;
+					pdata[off + ParticleField.VEL_X] = 0;
+					pdata[off + ParticleField.VEL_Y] = 0;
+					pdata[off + ParticleField.GVEL_00] = 0;
+					pdata[off + ParticleField.GVEL_01] = 0;
+					pdata[off + ParticleField.GVEL_10] = 0;
+					pdata[off + ParticleField.GVEL_11] = 0;
+				}
+			}
+			return;
+		}
+
 		for (i in 0...numP) {
 			final off = i * ParticleField.SIZE;
 			final px = pdata[off + ParticleField.POS_X];
@@ -357,6 +402,22 @@ class Main extends App {
 		return py >= height - OUTLET_DEPTH && (px <= OUTLET_WIDTH || px >= width - OUTLET_WIDTH);
 	}
 
+	function dampLeftOutletParticles():Void {
+		for (i in 0...numP) {
+			final off = i * ParticleField.SIZE;
+			final px = pdata[off + ParticleField.POS_X];
+			final py = pdata[off + ParticleField.POS_Y];
+			if (py >= pot.height / scale - OUTLET_DEPTH && px <= OUTLET_WIDTH) {
+				pdata[off + ParticleField.VEL_X] = 0;
+				pdata[off + ParticleField.VEL_Y] = 0;
+				pdata[off + ParticleField.GVEL_00] = 0;
+				pdata[off + ParticleField.GVEL_01] = 0;
+				pdata[off + ParticleField.GVEL_10] = 0;
+				pdata[off + ParticleField.GVEL_11] = 0;
+			}
+		}
+	}
+
 	function removeOutflowParticles():Void {
 		var i = 0;
 		var removed = false;
@@ -367,20 +428,32 @@ class Main extends App {
 				continue;
 			}
 
-			numP--;
 			final width = pot.width / scale;
-			if (pdata[off + ParticleField.POS_X] >= width - OUTLET_WIDTH)
+			final isRightOutlet = pdata[off + ParticleField.POS_X] >= width - OUTLET_WIDTH;
+			if (!isRightOutlet && leftOutflowBudget <= 0) {
+				i++;
+				continue;
+			}
+
+			numP--;
+			if (isRightOutlet)
 				rightOutflowCount++;
+			else
+				leftOutflowBudget--;
 			if (rightOutflowCount >= WIN_PARTICLES) {
 				won = true;
-				winMessage.innerHTML = level == 1 ? "LEVEL 1 COMPLETE!<br><small>CLICK TO START LEVEL 2</small>" : "YOU WIN!";
+				winMessage.innerHTML = level < 3
+					? "LEVEL " + level + " COMPLETE!<br><small>CLICK TO START LEVEL " + (level + 1) + "</small>"
+					: "YOU WIN!";
 				winMessage.style.display = "block";
 			}
 			final last = numP * ParticleField.SIZE;
 			if (i != numP) {
 				for (field in 0...ParticleField.SIZE)
 					pdata[off + field] = pdata[last + field];
+				level3Passed[i] = level3Passed[last];
 			}
+			level3Passed.pop();
 			removed = true;
 		}
 
@@ -439,6 +512,7 @@ class Main extends App {
 			resetGame();
 		else
 			openBaffleIfClicked();
+		leftOutflowBudget = INFLOW_PARTICLES;
 		addInflow();
 		for (t in 0...SUBSTEP) {
 			if (useWasm)
@@ -446,6 +520,7 @@ class Main extends App {
 			else
 				step();
 			applyBaffle();
+			dampLeftOutletParticles();
 			removeOutflowParticles();
 		}
 		updateMesh();
@@ -459,7 +534,9 @@ class Main extends App {
 			+ rightOutflowCount
 			+ " / "
 			+ WIN_PARTICLES
-			+ (won ? "<br>YOU WIN!" : level == 2
+			+ (won ? "<br>YOU WIN!" : level == 3
+				? "<br>Throw particles through the top-right gap"
+				: level == 2
 				? "<br>Baffles: "
 					+ (baffleOpenA ? "A OPEN" : "A CLOSED")
 					+ " / "
@@ -1155,6 +1232,27 @@ class Main extends App {
 		g.shaping(Triangles, () -> {
 			final baffleW = BAFFLE_WIDTH * scale;
 			final baffleCount = level == 2 ? 2 : 1;
+			if (level == 3) {
+				final width = pot.width / scale;
+				final height = pot.height / scale;
+				final segments = 48;
+				g.color(0.75, 0.75, 0.8, 1);
+				for (i in 0...segments) {
+					final y1 = height * i / segments;
+					final y2 = height * (i + 1) / segments;
+					if (y1 <= LEVEL3_GAP_DEPTH)
+						continue;
+					final x1 = level3BaffleX(y1) * scale;
+					final x2 = level3BaffleX(y2) * scale;
+					g.vertex(x1 - baffleW * 0.5, y1 * scale);
+					g.vertex(x1 + baffleW * 0.5, y1 * scale);
+					g.vertex(x2 + baffleW * 0.5, y2 * scale);
+					g.vertex(x1 - baffleW * 0.5, y1 * scale);
+					g.vertex(x2 + baffleW * 0.5, y2 * scale);
+					g.vertex(x2 - baffleW * 0.5, y2 * scale);
+				}
+				return;
+			}
 			for (i in 0...baffleCount) {
 				final isOpen = i == 0 ? baffleOpenA : baffleOpenB;
 				if (isOpen)
