@@ -399,17 +399,17 @@ class Main extends pot_core_App {
 		return width * 0.5;
 	}
 	openBaffleIfClicked() {
-		if(this.won || this.input.mouse.dleft != 1) {
+		if(this.won || this.input.pointer.ddown != 1) {
 			return;
 		}
-		let mouseX = this.input.mouse.x / this.scale;
-		let mouseY = this.input.mouse.y / this.scale;
-		if(mouseY < 0 || mouseY > this.pot.height / this.scale) {
+		let pointerX = this.input.pointer.x / this.scale;
+		let pointerY = this.input.pointer.y / this.scale;
+		if(pointerY < 0 || pointerY > this.pot.height / this.scale) {
 			return;
 		}
-		if(Math.abs(mouseX - this.getBaffleX()) <= 2.) {
+		if(Math.abs(pointerX - this.getBaffleX()) <= 2.) {
 			this.baffleOpenA = true;
-		} else if(this.level == 2 && this.baffleOpenA && Math.abs(mouseX - this.getBaffleX(1)) <= 2.) {
+		} else if(this.level == 2 && this.baffleOpenA && Math.abs(pointerX - this.getBaffleX(1)) <= 2.) {
 			this.baffleOpenB = true;
 		}
 	}
@@ -580,7 +580,7 @@ class Main extends pot_core_App {
 	}
 	update() {
 		let st = HxOverrides.now() / 1000;
-		if(this.won && this.input.mouse.dleft == 1) {
+		if(this.won && this.input.pointer.ddown == 1) {
 			this.resetGame();
 		} else {
 			this.openBaffleIfClicked();
