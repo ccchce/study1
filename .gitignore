@@ -3,16 +3,5 @@
 /Std/
 *.d.ts
 *.map
-*.js
-*.wasm
 *.wat
 /checker.sh
-
-bin
-*.d.ts
-*.map
-*.js
-*.wasm
-*.wat
-
-!/docs/
