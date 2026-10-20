@@ -309,17 +309,17 @@ class Main extends App {
 	}
 
 	function openBaffleIfClicked():Void {
-		if (won || input.mouse.dleft != 1)
+		if (won || input.pointer.ddown != 1)
 			return;
 
-		final mouseX = input.mouse.x / scale;
-		final mouseY = input.mouse.y / scale;
+		final pointerX = input.pointer.x / scale;
+		final pointerY = input.pointer.y / scale;
 		final height = pot.height / scale;
-		if (mouseY < 0 || mouseY > height)
+		if (pointerY < 0 || pointerY > height)
 			return;
-		if (Math.abs(mouseX - getBaffleX()) <= BAFFLE_WIDTH * 2) {
+		if (Math.abs(pointerX - getBaffleX()) <= BAFFLE_WIDTH * 2) {
 			baffleOpenA = true;
-		} else if (level == 2 && baffleOpenA && Math.abs(mouseX - getBaffleX(1)) <= BAFFLE_WIDTH * 2) {
+		} else if (level == 2 && baffleOpenA && Math.abs(pointerX - getBaffleX(1)) <= BAFFLE_WIDTH * 2) {
 			baffleOpenB = true;
 		}
 	}
@@ -434,7 +434,7 @@ class Main extends App {
 		// 	initSimulation();
 
 		final st = Timer.stamp();
-		final restarting = won && input.mouse.dleft == 1;
+		final restarting = won && input.pointer.ddown == 1;
 		if (restarting)
 			resetGame();
 		else
