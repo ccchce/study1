@@ -15,7 +15,4 @@ bin
 *.wasm
 *.wat
 
-!/water/bin/
-!/water/bin/index.html
-!/water/bin/main.js
-!/water/bin/main.wasm
+!/docs/
