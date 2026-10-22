@@ -347,6 +347,15 @@ class Main extends App {
 		}
 	}
 
+	function stopParticleAtBaffle(off:Int):Void {
+		pdata[off + ParticleField.VEL_X] = 0;
+		pdata[off + ParticleField.VEL_Y] = 0;
+		pdata[off + ParticleField.GVEL_00] = 0;
+		pdata[off + ParticleField.GVEL_01] = 0;
+		pdata[off + ParticleField.GVEL_10] = 0;
+		pdata[off + ParticleField.GVEL_11] = 0;
+	}
+
 	function applyBaffle():Void {
 		if (level == 3) {
 			final width = pot.width / scale;
@@ -377,16 +386,14 @@ class Main extends App {
 			final leftEdge = baffleX - BAFFLE_WIDTH * 0.5;
 			if (!baffleOpenA && px >= leftEdge) {
 				pdata[off + ParticleField.POS_X] = leftEdge - 1e-3;
-				if (pdata[off + ParticleField.VEL_X] > 0)
-					pdata[off + ParticleField.VEL_X] = 0;
+				stopParticleAtBaffle(off);
 			}
 			if (level == 2 && !baffleOpenB) {
 				final secondBaffleX = getBaffleX(1);
 				final secondLeftEdge = secondBaffleX - BAFFLE_WIDTH * 0.5;
 				if (pdata[off + ParticleField.POS_X] >= secondLeftEdge) {
 					pdata[off + ParticleField.POS_X] = secondLeftEdge - 1e-3;
-					if (pdata[off + ParticleField.VEL_X] > 0)
-						pdata[off + ParticleField.VEL_X] = 0;
+					stopParticleAtBaffle(off);
 				}
 			}
 		}

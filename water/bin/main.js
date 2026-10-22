@@ -432,6 +432,14 @@ class Main extends pot_core_App {
 			this.baffleOpenB = true;
 		}
 	}
+	stopParticleAtBaffle(off) {
+		this.pdata[off + 3] = 0;
+		this.pdata[off + 4] = 0;
+		this.pdata[off + 5] = 0;
+		this.pdata[off + 6] = 0;
+		this.pdata[off + 7] = 0;
+		this.pdata[off + 8] = 0;
+	}
 	applyBaffle() {
 		if(this.level == 3) {
 			let _g = 0;
@@ -465,17 +473,13 @@ class Main extends pot_core_App {
 			let leftEdge = this.getBaffleX() - 0.5;
 			if(!this.baffleOpenA && px >= leftEdge) {
 				this.pdata[off + 1] = leftEdge - 1e-3;
-				if(this.pdata[off + 3] > 0) {
-					this.pdata[off + 3] = 0;
-				}
+				this.stopParticleAtBaffle(off);
 			}
 			if(this.level == 2 && !this.baffleOpenB) {
 				let secondLeftEdge = this.getBaffleX(1) - 0.5;
 				if(this.pdata[off + 1] >= secondLeftEdge) {
 					this.pdata[off + 1] = secondLeftEdge - 1e-3;
-					if(this.pdata[off + 3] > 0) {
-						this.pdata[off + 3] = 0;
-					}
+					this.stopParticleAtBaffle(off);
 				}
 			}
 		}
